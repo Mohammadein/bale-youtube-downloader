@@ -9,7 +9,7 @@ import shutil
 
 TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = "downloads"
 PART_SIZE = "19M"
 
@@ -46,12 +46,13 @@ def download_youtube_video(url: str) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
     ydl_opts = {
-      "format": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-      "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
-      "merge_output_format": "mp4",
-      "noplaylist": True,
-      "quiet": True,
-      "cookiefile": "cookies.txt"
+        "format": "bv*[height<=720]+ba/b[height<=720]/best",
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),
+        "restrictfilenames": True
     }
 
 
