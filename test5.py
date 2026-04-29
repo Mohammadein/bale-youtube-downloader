@@ -50,7 +50,6 @@ def send_document(chat_id, file_path):
 def download_youtube_video(url: str, height: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-    # تنظیم کیفیت طبق انتخاب کاربر
     ydl_opts = {
         "format": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
@@ -81,31 +80,24 @@ def process_video(chat_id, url, height):
         video_dir = os.path.dirname(video_path)
         video_name = os.path.basename(video_path)
 
-        send_message(chat_id, "✂️ Splitting video...")
+        send_message(chat_id, "🗜 Creating split zip...")
 
-        prefix = os.path.join(video_dir, video_name + ".part_")
+        zip_base = os.path.join(video_dir, video_name + ".zip")
 
         subprocess.run(
-            ["split", "-b", PART_SIZE, video_path, prefix],
+            ["zip", "-s", PART_SIZE, "-j", zip_base, video_path],
             check=True
         )
 
         parts = sorted([
             os.path.join(video_dir, f)
             for f in os.listdir(video_dir)
-            if f.startswith(video_name + ".part_")
+            if f.startswith(video_name + ".z") or f.endswith(".zip")
         ])
 
-        # --- تبدیل هر پارت به zip ---
-        zip_parts = []
-        for part in parts:
-            zip_path = part + ".zip"
-            subprocess.run(["zip", "-j", zip_path, part], check=True)
-            zip_parts.append(zip_path)
+        total = len(parts)
 
-        total = len(zip_parts)
-
-        for i, part in enumerate(zip_parts, 1):
+        for i, part in enumerate(parts, 1):
             send_message(chat_id, f"📤 Sending part {i}/{total}")
             send_document(chat_id, part)
 
@@ -163,7 +155,6 @@ def main():
                 chat_id = msg["chat"]["id"]
                 text = msg["text"].strip()
 
-                # اگر منتظر انتخاب کیفیت است
                 if chat_id in pending_links:
                     try:
                         choice = int(text)
@@ -179,7 +170,6 @@ def main():
                         show_quality_list(chat_id)
                     continue
 
-                # اگر لینک ارسال کرده
                 if text.startswith("http"):
                     pending_links[chat_id] = text
                     show_quality_list(chat_id)
