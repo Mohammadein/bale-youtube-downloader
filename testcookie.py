@@ -3,30 +3,33 @@ import time
 import requests
 import subprocess
 import yt_dlp
-import shutil
 
 # ================== تنظیمات ==================
 
-TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
+TOKEN = "YOUR_TOKEN"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 DOWNLOAD_DIR = "downloads"
 PART_SIZE = "19M"
+COOKIES_FILE = "cookies.txt"
 
 # ============================================
 
 
 def send_message(chat_id, text):
-    r = requests.post(
-        BASE_URL + "sendMessage",
-        json={"chat_id": chat_id, "text": text},
-        timeout=30
-    )
-    print("sendMessage:", r.text)
+    try:
+        requests.post(
+            BASE_URL + "sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=30
+        )
+    except:
+        pass
 
 
 def send_document(chat_id, file_path):
     url = BASE_URL + "sendDocument"
+
     with open(file_path, "rb") as f:
         files = {
             "document": (
@@ -35,9 +38,10 @@ def send_document(chat_id, file_path):
                 "application/octet-stream"
             )
         }
+
         data = {"chat_id": chat_id}
-        r = requests.post(url, data=data, files=files, timeout=300)
-        print("sendDocument:", r.text)
+
+        requests.post(url, data=data, files=files, timeout=300)
 
 
 # ---------- دانلود یوتیوب ----------
@@ -46,15 +50,17 @@ def download_youtube_video(url: str) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
     ydl_opts = {
-        "format": "bv*[height<=720]+ba/b[height<=720]/best",
+        "format": "bestvideo[height<=720]+bestaudio/best[height<=720]",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
-        "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),
-        "restrictfilenames": True
+        "retries": 5,
+        "fragment_retries": 5,
     }
 
+    if os.path.exists(COOKIES_FILE):
+        ydl_opts["cookiefile"] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
@@ -63,7 +69,6 @@ def download_youtube_video(url: str) -> str:
     base, _ = os.path.splitext(filename)
     video_path = base + ".mp4"
 
-    # اگر فایل نهایی mp4 وجود نداشت، همان نام فایل اولیه را می‌دهیم
     if not os.path.exists(video_path):
         video_path = filename
 
@@ -73,10 +78,13 @@ def download_youtube_video(url: str) -> str:
 # ---------- پردازش و ارسال ----------
 
 def process_video(chat_id, url):
+    video_path = None
+
     try:
         send_message(chat_id, "⬇️ Downloading video...")
 
         video_path = download_youtube_video(url)
+
         video_dir = os.path.dirname(video_path)
         video_name = os.path.basename(video_path)
 
@@ -104,10 +112,11 @@ def process_video(chat_id, url):
         send_message(chat_id, "✅ Upload completed")
 
     except Exception as e:
-        send_message(chat_id, f"❌ Error: {e}")
+        send_message(chat_id, f"❌ Error: {str(e)}")
 
     finally:
-        cleanup(video_path)
+        if video_path:
+            cleanup(video_path)
 
 
 def cleanup(video_path):
@@ -118,8 +127,8 @@ def cleanup(video_path):
         for f in os.listdir(dir_path):
             if f.startswith(base):
                 os.remove(os.path.join(dir_path, f))
-    except Exception as e:
-        print("Cleanup error:", e)
+    except:
+        pass
 
 
 # ---------- دریافت پیام‌ها ----------
@@ -139,6 +148,7 @@ def main():
     while True:
         try:
             updates = get_updates(offset)
+
             for update in updates.get("result", []):
                 offset = update["update_id"] + 1
 
