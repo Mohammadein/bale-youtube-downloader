@@ -1,0 +1,9 @@
+from youtube_downloader import download_youtube_video
+
+if __name__ == "__main__":
+    url = "https://youtu.be/Rfz8s4dQ9eU?si=KgTR-8kUFBUyUx73"
+    try:
+        path = download_youtube_video(url)
+        print("دانلود شد در:", path)
+    except Exception as e:
+        print("خطا در دانلود:", e)
