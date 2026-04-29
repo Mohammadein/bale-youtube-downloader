@@ -44,15 +44,19 @@ def send_document(chat_id, file_path):
 def get_available_formats(url):
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
         info = ydl.extract_info(url, download=False)
-    formats = info.get("formats", [])
 
+    formats = info.get("formats", [])
     qualities = []
+
     for f in formats:
-        if f.get("height"):
+        if f.get("vcodec") != "none" and f.get("height") and f["height"] >= 144:
             qualities.append(f"{f['height']}p")
 
-    qualities = sorted(set(qualities))
+    # حذف تکراری‌ها و مرتب‌سازی عددی
+    qualities = sorted(set(qualities), key=lambda x: int(x.replace("p", "")))
+
     return qualities
+
 
 
 # ---------- دانلود یوتیوب ----------
