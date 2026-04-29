@@ -1,0 +1,11 @@
+anyio==4.13.0
+build==1.4.4
+certifi==2026.4.22
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.13
+packaging==26.2
+pyproject_hooks==1.2.0
+python-telegram-bot==21.4
+typing_extensions==4.15.0
