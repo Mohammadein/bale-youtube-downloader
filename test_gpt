@@ -1,79 +1,38 @@
-import os
-import subprocess
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-
+from telegram.ext import Updater, MessageHandler, Filters
 from youtube_downloader import download_youtube_video
+import subprocess, os
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "YOUR_BOT_TOKEN"
 
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_message(update, context):
     url = update.message.text
-
-    await update.message.reply_text("Downloading video...")
-
+    update.message.reply_text("Downloading video...")
     try:
-        # Download video
         video_path = download_youtube_video(url)
-
-        await update.message.reply_text("Compressing file...")
-
+        update.message.reply_text("Compressing file...")
         zip_path = video_path + ".zip"
-
-        subprocess.run([
-            "zip",
-            "-j",
-            zip_path,
-            video_path
-        ])
-
-        await update.message.reply_text("Splitting file...")
-
-        subprocess.run([
-            "split",
-            "-b",
-            "19M",
-            zip_path,
-            zip_path + ".part"
-        ])
-
-        # Collect split parts
-        parts = sorted([
-            f for f in os.listdir()
-            if f.startswith(os.path.basename(zip_path) + ".part")
-        ])
-
-        # Send each part
+        subprocess.run(["zip", "-j", zip_path, video_path])
+        update.message.reply_text("Splitting file...")
+        subprocess.run(["split", "-b", "19M", zip_path, zip_path + ".part"])
+        parts = sorted([f for f in os.listdir() if f.startswith(os.path.basename(zip_path) + ".part")])
         for part in parts:
             with open(part, "rb") as f:
-                await update.message.reply_document(f)
-
-        await update.message.reply_text("Upload completed ✅")
-
-        # Cleanup files
+                update.message.reply_document(f)
+        update.message.reply_text("Upload completed ✅")
         os.remove(video_path)
         os.remove(zip_path)
         for part in parts:
             os.remove(part)
-
     except Exception as e:
-        await update.message.reply_text(f"Error: {e}")
-
+        update.message.reply_text(f"Error: {e}")
 
 def main():
-    app = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .base_url("https://tapi.bale.ai/bot/")
-        .base_file_url("https://tapi.bale.ai/file/bot/")
-        .build()
-    )
+    updater = Updater(TOKEN, base_url="https://tapi.bale.ai/bot/", base_file_url="https://tapi.bale.ai/file/bot/")
+    dispatcher = updater.dispatcher
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    app.run_polling()
-
+    dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
