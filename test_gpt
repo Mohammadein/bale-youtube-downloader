@@ -1,32 +1,5 @@
-import requests
-import time
 import os
 import subprocess
-from youtube_downloader import download_youtube_video
-
-TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
-BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
-
-
-def get_updates(offset=None):
-    url = BASE_URL + "getUpdates"
-    params = {"timeout": 30, "offset": offset}
-    return requests.get(url, params=params).json()
-
-
-def send_message(chat_id, text):
-    url = BASE_URL + "sendMessage"
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text
-    })
-
-
-def send_document(chat_id, path):
-    url = BASE_URL + "sendDocument"
-    with open(path, "rb") as f:
-        requests.post(url, data={"chat_id": chat_id}, files={"document": f})
-
 
 def handle_message(chat_id, text):
 
@@ -35,18 +8,30 @@ def handle_message(chat_id, text):
     try:
         video_path = download_youtube_video(text)
 
+        video_dir = os.path.dirname(video_path)
+        video_name = os.path.basename(video_path)
+
         send_message(chat_id, "Compressing file...")
 
-        zip_path = video_path + ".zip"
-        subprocess.run(["zip", "-j", zip_path, video_path])
+        zip_path = os.path.join(video_dir, video_name + ".zip")
+
+        subprocess.run([
+            "zip", "-j", zip_path, video_path
+        ])
 
         send_message(chat_id, "Splitting file...")
 
-        subprocess.run(["split", "-b", "19M", zip_path, zip_path + ".part"])
+        subprocess.run([
+            "split",
+            "-b", "19M",
+            zip_path,
+            os.path.join(video_dir, "part_")
+        ])
 
         parts = sorted([
-            f for f in os.listdir()
-            if f.startswith(os.path.basename(zip_path) + ".part")
+            os.path.join(video_dir, f)
+            for f in os.listdir(video_dir)
+            if f.startswith("part_")
         ])
 
         for part in parts:
@@ -56,26 +41,3 @@ def handle_message(chat_id, text):
 
     except Exception as e:
         send_message(chat_id, f"Error: {e}")
-
-
-def main():
-    offset = None
-
-    while True:
-        updates = get_updates(offset)
-
-        for update in updates["result"]:
-            offset = update["update_id"] + 1
-
-            if "message" in update:
-                chat_id = update["message"]["chat"]["id"]
-                text = update["message"].get("text")
-
-                if text:
-                    handle_message(chat_id, text)
-
-        time.sleep(1)
-
-
-if __name__ == "__main__":
-    main()
