@@ -4,14 +4,17 @@ import requests
 import subprocess
 import yt_dlp
 
+# ================== تنظیمات ==================
 TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 DOWNLOAD_DIR = "downloads"
 PART_SIZE = "19M"
 
+# دیکشنری برای ذخیره وضعیت کاربران (لینک و کیفیت‌های پیدا شده)
 user_sessions = {}
 
+# ============================================
 
 def send_message(chat_id, text):
     requests.post(
@@ -20,200 +23,142 @@ def send_message(chat_id, text):
         timeout=30
     )
 
-
 def send_document(chat_id, file_path):
+    url = BASE_URL + "sendDocument"
     with open(file_path, "rb") as f:
-        requests.post(
-            BASE_URL + "sendDocument",
-            data={"chat_id": chat_id},
-            files={"document": (os.path.basename(file_path), f)},
-            timeout=300
-        )
+        files = {"document": (os.path.basename(file_path), f, "application/octet-stream")}
+        requests.post(url, data={"chat_id": chat_id}, files=files, timeout=300)
 
-
-def get_video_formats(url):
-
-    ydl_opts = {"quiet": True}
-
+def get_video_qualities(url):
+    """استخراج لیست کیفیت‌های موجود"""
+    ydl_opts = {'quiet': True}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        formats = info.get('formats', [])
+        
+        heights = set()
+        for f in formats:
+            if f.get('vcodec') != 'none' and f.get('height'):
+                heights.add(f['height'])
+        
+        return sorted(list(heights))
 
-    formats = []
-
-    for f in info["formats"]:
-        if f.get("vcodec") != "none" and f.get("height"):
-            formats.append({
-                "id": f["format_id"],
-                "height": f["height"],
-                "ext": f["ext"]
-            })
-
-    # حذف کیفیت‌های تکراری
-    seen = set()
-    clean = []
-
-    for f in sorted(formats, key=lambda x: x["height"]):
-        if f["height"] not in seen:
-            clean.append(f)
-            seen.add(f["height"])
-
-    return clean
-
-
-def download_video(url, format_id):
-
+def download_youtube_video(url, target_height):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+    # انتخاب بهترین ویدیو با کیفیت انتخابی + بهترین صدا و تبدیل به mp4
     ydl_opts = {
-        "format": format_id,
+        "format": f"bestvideo[height<={target_height}]+bestaudio/best[height<={target_height}]/best",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
+        "noplaylist": True,
         "quiet": True,
-        "merge_output_format": "mp4"
+        "merge_output_format": "mp4",
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
 
+    # اطمینان از اینکه پسوند نهایی mp4 است (به دلیل merge)
     base, _ = os.path.splitext(filename)
-    path = base + ".mp4"
+    final_path = base + ".mp4"
+    return final_path if os.path.exists(final_path) else filename
 
-    if not os.path.exists(path):
-        path = filename
+def process_video(chat_id, url, quality):
+    try:
+        send_message(chat_id, f"⬇️ Downloading in {quality}p...")
+        video_path = download_youtube_video(url, quality)
+        
+        video_dir = os.path.dirname(video_path)
+        video_name = os.path.basename(video_path)
 
-    return path
+        send_message(chat_id, "✂️ Splitting video...")
+        prefix = os.path.join(video_dir, video_name + ".part_")
 
+        subprocess.run(["split", "-b", PART_SIZE, video_path, prefix], check=True)
 
-def split_and_send(chat_id, video_path):
+        parts = sorted([
+            os.path.join(video_dir, f)
+            for f in os.listdir(video_dir)
+            if f.startswith(video_name + ".part_")
+        ])
 
-    video_dir = os.path.dirname(video_path)
-    video_name = os.path.basename(video_path)
+        for i, part in enumerate(parts, 1):
+            send_message(chat_id, f"📤 Sending part {i}/{len(parts)}")
+            send_document(chat_id, part)
 
-    prefix = os.path.join(video_dir, video_name + ".part_")
-
-    subprocess.run(
-        ["split", "-b", PART_SIZE, video_path, prefix],
-        check=True
-    )
-
-    parts = sorted([
-        os.path.join(video_dir, f)
-        for f in os.listdir(video_dir)
-        if f.startswith(video_name + ".part_")
-    ])
-
-    total = len(parts)
-
-    for i, part in enumerate(parts, 1):
-        send_message(chat_id, f"Sending part {i}/{total}")
-        send_document(chat_id, part)
-
-    send_message(chat_id, "✅ Upload completed")
-
-    cleanup(video_path)
-
+        send_message(chat_id, "✅ Done!")
+    except Exception as e:
+        send_message(chat_id, f"❌ Error: {e}")
+    finally:
+        if 'video_path' in locals():
+            cleanup(video_path)
 
 def cleanup(video_path):
-
     try:
         dir_path = os.path.dirname(video_path)
         base = os.path.basename(video_path)
-
         for f in os.listdir(dir_path):
             if f.startswith(base):
                 os.remove(os.path.join(dir_path, f))
     except:
         pass
 
-
 def get_updates(offset=None):
-    return requests.get(
-        BASE_URL + "getUpdates",
-        params={"timeout": 30, "offset": offset},
-        timeout=35
-    ).json()
-
-
-def handle_message(chat_id, text):
-
-    if chat_id in user_sessions and text.isdigit():
-
-        session = user_sessions[chat_id]
-        idx = int(text) - 1
-
-        if 0 <= idx < len(session["formats"]):
-
-            format_id = session["formats"][idx]["id"]
-            url = session["url"]
-
-            send_message(chat_id, "⬇️ Downloading video...")
-
-            video_path = download_video(url, format_id)
-
-            send_message(chat_id, "✂️ Splitting video...")
-
-            split_and_send(chat_id, video_path)
-
-            del user_sessions[chat_id]
-
-            return
-
-        else:
-            send_message(chat_id, "عدد معتبر نیست")
-            return
-
-    if text.startswith("http"):
-
-        send_message(chat_id, "🔎 Getting available qualities...")
-
-        formats = get_video_formats(text)
-
-        if not formats:
-            send_message(chat_id, "❌ کیفیتی پیدا نشد")
-            return
-
-        user_sessions[chat_id] = {
-            "url": text,
-            "formats": formats
-        }
-
-        msg = "کیفیت مورد نظر را انتخاب کن:\n\n"
-
-        for i, f in enumerate(formats, 1):
-            msg += f"{i} - {f['height']}p\n"
-
-        send_message(chat_id, msg)
-
-    else:
-        send_message(chat_id, "🔗 لطفاً لینک یوتیوب بفرست")
-
+    try:
+        r = requests.get(BASE_URL + "getUpdates", params={"timeout": 30, "offset": offset}, timeout=35)
+        return r.json()
+    except:
+        return {}
 
 def main():
-
     offset = None
-
-    print("Bot started")
+    print("✅ Bot is running...")
 
     while True:
-
         updates = get_updates(offset)
-
         for update in updates.get("result", []):
-
             offset = update["update_id"] + 1
-
             msg = update.get("message")
-
-            if not msg:
-                continue
+            if not msg or "text" not in msg: continue
 
             chat_id = msg["chat"]["id"]
-            text = msg.get("text", "").strip()
+            text = msg["text"].strip()
 
-            handle_message(chat_id, text)
+            # اگر کاربر قبلاً لینک فرستاده و الان دارد عدد کیفیت را انتخاب می‌کند
+            if chat_id in user_sessions and text.isdigit():
+                idx = int(text) - 1
+                session = user_sessions[chat_id]
+                if 0 <= idx < len(session['qualities']):
+                    selected_q = session['qualities'][idx]
+                    video_url = session['url']
+                    del user_sessions[chat_id] # پاک کردن جلسه
+                    process_video(chat_id, video_url, selected_q)
+                else:
+                    send_message(chat_id, "عدد انتخاب شده معتبر نیست.")
+                continue
+
+            # دریافت لینک جدید
+            if text.startswith("http"):
+                send_message(chat_id, "🔎 Checking qualities...")
+                try:
+                    qs = get_video_qualities(text)
+                    if not qs:
+                        send_message(chat_id, "هیچ کیفیتی برای این ویدیو یافت نشد.")
+                        continue
+                    
+                    user_sessions[chat_id] = {'url': text, 'qualities': qs}
+                    
+                    menu = "یک کیفیت را انتخاب کنید (فقط عدد را بفرستید):\n\n"
+                    for i, q in enumerate(qs, 1):
+                        menu += f"{i} - {q}p\n"
+                    send_message(chat_id, menu)
+                except Exception as e:
+                    send_message(chat_id, f"خطا در بررسی لینک: {e}")
+            else:
+                send_message(chat_id, "🔗 لطفاً یک لینک یوتیوب معتبر بفرستید.")
 
         time.sleep(1)
-
 
 if __name__ == "__main__":
     main()
