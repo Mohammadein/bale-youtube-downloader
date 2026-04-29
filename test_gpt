@@ -1,38 +1,81 @@
-from telegram.ext import Updater, MessageHandler, Filters
+import requests
+import time
+import os
+import subprocess
 from youtube_downloader import download_youtube_video
-import subprocess, os
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
+BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
-def handle_message(update, context):
-    url = update.message.text
-    update.message.reply_text("Downloading video...")
+
+def get_updates(offset=None):
+    url = BASE_URL + "getUpdates"
+    params = {"timeout": 30, "offset": offset}
+    return requests.get(url, params=params).json()
+
+
+def send_message(chat_id, text):
+    url = BASE_URL + "sendMessage"
+    requests.post(url, json={
+        "chat_id": chat_id,
+        "text": text
+    })
+
+
+def send_document(chat_id, path):
+    url = BASE_URL + "sendDocument"
+    with open(path, "rb") as f:
+        requests.post(url, data={"chat_id": chat_id}, files={"document": f})
+
+
+def handle_message(chat_id, text):
+
+    send_message(chat_id, "Downloading video...")
+
     try:
-        video_path = download_youtube_video(url)
-        update.message.reply_text("Compressing file...")
+        video_path = download_youtube_video(text)
+
+        send_message(chat_id, "Compressing file...")
+
         zip_path = video_path + ".zip"
         subprocess.run(["zip", "-j", zip_path, video_path])
-        update.message.reply_text("Splitting file...")
+
+        send_message(chat_id, "Splitting file...")
+
         subprocess.run(["split", "-b", "19M", zip_path, zip_path + ".part"])
-        parts = sorted([f for f in os.listdir() if f.startswith(os.path.basename(zip_path) + ".part")])
+
+        parts = sorted([
+            f for f in os.listdir()
+            if f.startswith(os.path.basename(zip_path) + ".part")
+        ])
+
         for part in parts:
-            with open(part, "rb") as f:
-                update.message.reply_document(f)
-        update.message.reply_text("Upload completed ✅")
-        os.remove(video_path)
-        os.remove(zip_path)
-        for part in parts:
-            os.remove(part)
+            send_document(chat_id, part)
+
+        send_message(chat_id, "Upload completed ✅")
+
     except Exception as e:
-        update.message.reply_text(f"Error: {e}")
+        send_message(chat_id, f"Error: {e}")
+
 
 def main():
-    updater = Updater(TOKEN, base_url="https://tapi.bale.ai/bot/", base_file_url="https://tapi.bale.ai/file/bot/")
-    dispatcher = updater.dispatcher
+    offset = None
 
-    dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
-    updater.start_polling()
-    updater.idle()
+    while True:
+        updates = get_updates(offset)
+
+        for update in updates["result"]:
+            offset = update["update_id"] + 1
+
+            if "message" in update:
+                chat_id = update["message"]["chat"]["id"]
+                text = update["message"].get("text")
+
+                if text:
+                    handle_message(chat_id, text)
+
+        time.sleep(1)
+
 
 if __name__ == "__main__":
     main()
