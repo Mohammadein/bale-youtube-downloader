@@ -7,7 +7,7 @@ import shutil
 
 # ================== تنظیمات ==================
 
-TOKEN = os.getenv("token")   # تغییر شماره 1
+TOKEN = os.getenv("token")
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 DOWNLOAD_DIR = "downloads"
@@ -49,23 +49,21 @@ def get_available_formats(url):
     qualities = []
 
     for f in formats:
-        if f.get("vcodec") != "none" and f.get("height") and f["height"] >= 144:
+        if f.get("height"):
             qualities.append(f"{f['height']}p")
 
-    # حذف تکراری‌ها و مرتب‌سازی عددی
     qualities = sorted(set(qualities), key=lambda x: int(x.replace("p", "")))
-
     return qualities
-
 
 
 # ---------- دانلود یوتیوب ----------
 def download_youtube_video(url: str, quality: str) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-    # تغییر شماره 3 (فرمت بر اساس کیفیت انتخاب‌شده)
+    height = quality.replace("p", "")
+
     ydl_opts = {
-        "format": f"bestvideo[height<={quality.replace('p','')}]+bestaudio/best[height<={quality.replace('p','')}]",
+        "format": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
         "merge_output_format": "mp4",
         "noplaylist": True,
@@ -85,26 +83,41 @@ def download_youtube_video(url: str, quality: str) -> str:
     return video_path
 
 
-# ---------- پردازش و ارسال ----------
-user_quality_choice = {}   # ذخیره کیفیت انتخابی کاربران
+# ---------- مدیریت انتخاب کیفیت ----------
+user_quality_choice = {}
 
 
 def process_video(chat_id, url):
+    video_path = None
     try:
-        # اگر کیفیت انتخاب نشده → ابتدا کیفیت‌ها را بفرستیم
+        # اگر هنوز کیفیت انتخاب نشده
         if chat_id not in user_quality_choice:
             qualities = get_available_formats(url)
-            qtext = "لطفاً یکی از کیفیت‌های موجود را بفرست:\n" + "\n".join(qualities)
-            user_quality_choice[chat_id] = {"url": url, "waiting": True, "qualities": qualities}
+
+            if not qualities:
+                send_message(chat_id, "❌ هیچ کیفیتی پیدا نشد.")
+                return
+
+            qtext = "🎬 کیفیت مورد نظر را انتخاب کن:\n\n"
+            for i, q in enumerate(qualities, 1):
+                qtext += f"{i}️⃣ {q}\n"
+
+            user_quality_choice[chat_id] = {
+                "url": url,
+                "waiting": True,
+                "qualities": qualities
+            }
+
             send_message(chat_id, qtext)
             return
 
-        # کیفیت انتخاب شده:
+        # کیفیت انتخاب شده
         quality = user_quality_choice[chat_id]["choice"]
 
         send_message(chat_id, f"⬇️ Downloading video in {quality} ...")
 
         video_path = download_youtube_video(url, quality)
+
         video_dir = os.path.dirname(video_path)
         video_name = os.path.basename(video_path)
 
@@ -123,11 +136,16 @@ def process_video(chat_id, url):
             if f.startswith(video_name + ".part_")
         ])
 
-        # تغییر شماره 2: zip شدن پارت‌ها
+        # zip کردن پارت‌ها
         zipped_parts = []
         for part in parts:
             zip_path = part + ".zip"
-            shutil.make_archive(part, "zip", root_dir=video_dir, base_dir=os.path.basename(part))
+            shutil.make_archive(
+                part,
+                "zip",
+                root_dir=video_dir,
+                base_dir=os.path.basename(part)
+            )
             zipped_parts.append(zip_path)
 
         total = len(zipped_parts)
@@ -143,7 +161,9 @@ def process_video(chat_id, url):
 
     finally:
         user_quality_choice.pop(chat_id, None)
-        cleanup(video_path)
+
+        if video_path and os.path.exists(video_path):
+            cleanup(video_path)
 
 
 def cleanup(video_path):
@@ -174,6 +194,7 @@ def main():
     while True:
         try:
             updates = get_updates(offset)
+
             for update in updates.get("result", []):
                 offset = update["update_id"] + 1
 
@@ -184,16 +205,26 @@ def main():
                 chat_id = msg["chat"]["id"]
                 text = msg["text"].strip()
 
-                # اگر در حال انتخاب کیفیت است:
+                # اگر کاربر در حال انتخاب کیفیت است
                 if chat_id in user_quality_choice and user_quality_choice[chat_id]["waiting"]:
-                    if text in user_quality_choice[chat_id]["qualities"]:
-                        user_quality_choice[chat_id]["choice"] = text
-                        user_quality_choice[chat_id]["waiting"] = False
-                        process_video(chat_id, user_quality_choice[chat_id]["url"])
+                    if text.isdigit():
+                        index = int(text) - 1
+                        qualities = user_quality_choice[chat_id]["qualities"]
+
+                        if 0 <= index < len(qualities):
+                            quality = qualities[index]
+
+                            user_quality_choice[chat_id]["choice"] = quality
+                            user_quality_choice[chat_id]["waiting"] = False
+
+                            process_video(chat_id, user_quality_choice[chat_id]["url"])
+                        else:
+                            send_message(chat_id, "❗ شماره کیفیت نامعتبر است.")
                     else:
-                        send_message(chat_id, "❗ کیفیت نامعتبر است.")
+                        send_message(chat_id, "❗ لطفاً شماره کیفیت را ارسال کن.")
                     continue
 
+                # اگر لینک یوتیوب فرستاده شد
                 if text.startswith("http"):
                     process_video(chat_id, text)
                 else:
