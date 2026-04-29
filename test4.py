@@ -3,19 +3,19 @@ import time
 import requests
 import subprocess
 import yt_dlp
+import shutil
 
 # ================== تنظیمات ==================
 
-TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
+TOKEN = os.getenv("token") 
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 DOWNLOAD_DIR = "downloads"
 PART_SIZE = "19M"
 
-# ذخیره وضعیت کاربران برای انتخاب کیفیت
-user_sessions = {}
-
 # ============================================
+
+pending_links = {}  # برای نگهداری لینک‌ها که منتظر انتخاب کیفیت هستند
 
 
 def send_message(chat_id, text):
@@ -42,40 +42,14 @@ def send_document(chat_id, file_path):
         print("sendDocument:", r.text)
 
 
-# ---------- دریافت کیفیت‌ها ----------
+# ---------- دانلود یوتیوب ----------
 
-def get_video_qualities(url):
-    STANDARD_QUALITIES = [144, 240, 360, 480, 720, 1080, 1440, 2160]
-
-    ydl_opts = {
-        'quiet': True,
-        'skip_download': True
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        formats = info.get('formats', [])
-
-        available = set()
-
-        for f in formats:
-            if f.get('vcodec') != 'none' and f.get('height'):
-                available.add(f['height'])
-
-        # فقط کیفیت‌های استاندارد که موجود هستند
-        result = [q for q in STANDARD_QUALITIES if q in available]
-
-        return result
-
-
-
-# ---------- دانلود یوتیوب با کیفیت انتخابی ----------
-
-def download_youtube_video(url: str, target_height: int) -> str:
+def download_youtube_video(url: str, quality: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
     ydl_opts = {
-        "format": f"bestvideo[height<={target_height}]+bestaudio/best[height<={target_height}]/best",
+        # تنظیم کیفیت بر اساس انتخاب کاربر
+        "format": f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
         "merge_output_format": "mp4",
         "noplaylist": True,
@@ -89,6 +63,7 @@ def download_youtube_video(url: str, target_height: int) -> str:
     base, _ = os.path.splitext(filename)
     video_path = base + ".mp4"
 
+    # اگر فایل نهایی mp4 یافت نشد، همان نام فایل اولیه
     if not os.path.exists(video_path):
         video_path = filename
 
@@ -99,13 +74,13 @@ def download_youtube_video(url: str, target_height: int) -> str:
 
 def process_video(chat_id, url, quality):
     try:
-        send_message(chat_id, f"⬇️ Downloading in {quality}p...")
+        send_message(chat_id, f"⬇️ در حال دانلود ویدیو با کیفیت {quality}p ...")
 
         video_path = download_youtube_video(url, quality)
         video_dir = os.path.dirname(video_path)
         video_name = os.path.basename(video_path)
 
-        send_message(chat_id, "✂️ Splitting video...")
+        send_message(chat_id, "✂️ در حال تقسیم ویدیو به بخش‌های کوچک‌تر...")
 
         prefix = os.path.join(video_dir, video_name + ".part_")
 
@@ -123,17 +98,16 @@ def process_video(chat_id, url, quality):
         total = len(parts)
 
         for i, part in enumerate(parts, 1):
-            send_message(chat_id, f"📤 Sending part {i}/{total}")
+            send_message(chat_id, f"📤 در حال ارسال بخش {i}/{total}")
             send_document(chat_id, part)
 
-        send_message(chat_id, "✅ Upload completed")
+        send_message(chat_id, "✅ ارسال ویدیو تکمیل شد")
 
     except Exception as e:
-        send_message(chat_id, f"❌ Error: {e}")
+        send_message(chat_id, f"❌ خطا در پردازش: {e}")
 
     finally:
-        if 'video_path' in locals():
-            cleanup(video_path)
+        cleanup(video_path)
 
 
 def cleanup(video_path):
@@ -154,7 +128,7 @@ def get_updates(offset=None):
     return requests.get(
         BASE_URL + "getUpdates",
         params={"timeout": 30, "offset": offset},
-        timeout=35
+        timeout=
     ).json()
 
 
@@ -162,69 +136,8 @@ def main():
     offset = None
     print("✅ Bale bot started...")
 
+    qualities = [144, 240, 360, 480, 720, 1080, 1440, 2160]
+
     while True:
         try:
-            updates = get_updates(offset)
-
-            for update in updates.get("result", []):
-                offset = update["update_id"] + 1
-
-                msg = update.get("message")
-                if not msg or "text" not in msg:
-                    continue
-
-                chat_id = msg["chat"]["id"]
-                text = msg["text"].strip()
-
-                # اگر کاربر در حال انتخاب کیفیت است
-                if chat_id in user_sessions and text.isdigit():
-                    idx = int(text) - 1
-                    session = user_sessions[chat_id]
-
-                    if 0 <= idx < len(session["qualities"]):
-                        selected_q = session["qualities"][idx]
-                        video_url = session["url"]
-
-                        del user_sessions[chat_id]
-
-                        process_video(chat_id, video_url, selected_q)
-                    else:
-                        send_message(chat_id, "❌ عدد نامعتبر است.")
-                    continue
-
-                # اگر لینک جدید ارسال شده
-                if text.startswith("http"):
-                    send_message(chat_id, "🔎 Checking qualities...")
-
-                    try:
-                        qs = get_video_qualities(text)
-
-                        if not qs:
-                            send_message(chat_id, "❌ کیفیتی یافت نشد.")
-                            continue
-
-                        user_sessions[chat_id] = {
-                            "url": text,
-                            "qualities": qs
-                        }
-
-                        menu = "یک کیفیت را انتخاب کنید (فقط عدد را ارسال کنید):\n\n"
-
-                        for i, q in enumerate(qs, 1):
-                            menu += f"{i} - {q}p\n"
-
-                        send_message(chat_id, menu)
-
-                    except Exception as e:
-                        send_message(chat_id, f"❌ خطا در بررسی لینک:\n{e}")
-
-                else:
-                    send_message(chat_id, "🔗 لطفاً لینک یوتیوب ارسال کن")
-
-        except Exception as e:
-            print("Main loop error:", e)
-            time.sleep(5)
-
-
-if __name__ == "__main__":
-    main()
+            updates = get_updates(offsetet
