@@ -45,14 +45,14 @@ def send_document(chat_id, file_path):
 def download_youtube_video(url: str) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-  ydl_opts = {
+    ydl_opts = {
       "format": "bestvideo[height<=720]+bestaudio/best[height<=720]",
       "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
       "merge_output_format": "mp4",
       "noplaylist": True,
       "quiet": True,
       "cookiefile": "cookies.txt"
-  }
+    }
 
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
