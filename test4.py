@@ -128,7 +128,7 @@ def get_updates(offset=None):
     return requests.get(
         BASE_URL + "getUpdates",
         params={"timeout": 30, "offset": offset},
-        timeout=
+        timeout=35
     ).json()
 
 
