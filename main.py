@@ -211,7 +211,7 @@ bot = telegram.Bot(
 
 
 def main():
-    updater = Updater(token, use_context=True)
+    updater = Updater(bot=bot, use_context=True)
     dp = updater.dispatcher
 
     # ---------------------------------------------->>>> User Bot Handler
