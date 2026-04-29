@@ -45,17 +45,28 @@ def send_document(chat_id, file_path):
 # ---------- دریافت کیفیت‌ها ----------
 
 def get_video_qualities(url):
-    ydl_opts = {'quiet': True}
+    STANDARD_QUALITIES = [144, 240, 360, 480, 720, 1080, 1440, 2160]
+
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True
+    }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         formats = info.get('formats', [])
 
-        heights = set()
+        available = set()
+
         for f in formats:
             if f.get('vcodec') != 'none' and f.get('height'):
-                heights.add(f['height'])
+                available.add(f['height'])
 
-        return sorted(list(heights))
+        # فقط کیفیت‌های استاندارد که موجود هستند
+        result = [q for q in STANDARD_QUALITIES if q in available]
+
+        return result
+
 
 
 # ---------- دانلود یوتیوب با کیفیت انتخابی ----------
