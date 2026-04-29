@@ -11,16 +11,14 @@ TOKEN = os.environ["token"]
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 DOWNLOAD_DIR = "downloads"
-PART_SIZE = "19M"
+PART_SIZE = "19m"   # توجه: RAR از m یا k استفاده می‌کند، نه M
 
 # ============================================
 
-# لیست کیفیت‌های مجاز
 AVAILABLE_HEIGHTS = [144, 240, 360, 480, 720, 1080, 1440, 2160]
-# دیکشنری برای ذخیره لینک‌های در انتظار انتخاب کیفیت
 pending_links = {}
 
-# ---------- توابع ارسال در بات ----------
+# ---------- توابع ارسال ----------
 
 def send_message(chat_id, text):
     r = requests.post(
@@ -42,8 +40,9 @@ def send_document(chat_id, file_path):
             )
         }
         data = {"chat_id": chat_id}
-        r = requests.post(url, data=data, files=files, timeout=300)
+        r = requests.post(url, data=data, files=files, timeout=600)
         print("sendDocument:", r.text)
+
 
 # ---------- دانلود یوتیوب ----------
 
@@ -70,6 +69,7 @@ def download_youtube_video(url: str, height: int) -> str:
 
     return video_path
 
+
 # ---------- پردازش و ارسال ----------
 
 def process_video(chat_id, url, height):
@@ -80,19 +80,33 @@ def process_video(chat_id, url, height):
         video_dir = os.path.dirname(video_path)
         video_name = os.path.basename(video_path)
 
-        send_message(chat_id, "🗜 Creating split zip...")
+        base_name, _ = os.path.splitext(video_name)
 
-        zip_base = os.path.join(video_dir, video_name + ".zip")
+        send_message(chat_id, "🗜 Creating multipart RAR...")
 
+        rar_base = os.path.join(video_dir, base_name + ".rar")
+
+        # ایجاد فایل rar چند بخشی
         subprocess.run(
-            ["zip", "-s", PART_SIZE, "-j", zip_base, video_path],
+            [
+                "rar", "a",
+                f"-v{PART_SIZE}",   # مثال: -v19m
+                "-ep",
+                rar_base,
+                video_path
+            ],
             check=True
         )
+
+        # فایل‌های خروجی:
+        # video.part1.rar
+        # video.part2.rar
+        # ...
 
         parts = sorted([
             os.path.join(video_dir, f)
             for f in os.listdir(video_dir)
-            if f.startswith(video_name + ".z") or f.endswith(".zip")
+            if f.startswith(base_name + ".part") and f.endswith(".rar")
         ])
 
         total = len(parts)
@@ -110,16 +124,29 @@ def process_video(chat_id, url, height):
         cleanup(video_path)
 
 
+# ---------- پاکسازی ----------
+
 def cleanup(video_path):
     try:
         dir_path = os.path.dirname(video_path)
-        base = os.path.basename(video_path)
+        video_name = os.path.basename(video_path)
+        base_name, _ = os.path.splitext(video_name)
 
         for f in os.listdir(dir_path):
-            if f.startswith(base):
-                os.remove(os.path.join(dir_path, f))
+            full = os.path.join(dir_path, f)
+
+            # حذف mp4
+            if f == video_name:
+                os.remove(full)
+                continue
+
+            # حذف rar های چندبخشی
+            if f.startswith(base_name + ".part") and f.endswith(".rar"):
+                os.remove(full)
+
     except Exception as e:
         print("Cleanup error:", e)
+
 
 # ---------- دریافت پیام‌ها ----------
 
@@ -130,11 +157,13 @@ def get_updates(offset=None):
         timeout=35
     ).json()
 
+
 def show_quality_list(chat_id):
     txt = "📺 لطفاً کیفیت مورد نظرت را انتخاب کن:\n"
     txt += "\n".join([f"{i+1}) {h}p" for i, h in enumerate(AVAILABLE_HEIGHTS)])
     send_message(chat_id, txt)
     send_message(chat_id, "🔢 عدد مربوط به کیفیت را بفرست (مثلاً 5 برای 720p)")
+
 
 # ---------- حلقه اصلی ----------
 
@@ -155,6 +184,7 @@ def main():
                 chat_id = msg["chat"]["id"]
                 text = msg["text"].strip()
 
+                # انتخاب کیفیت
                 if chat_id in pending_links:
                     try:
                         choice = int(text)
@@ -163,13 +193,14 @@ def main():
                             url = pending_links.pop(chat_id)
                             process_video(chat_id, url, height)
                         else:
-                            send_message(chat_id, "❌ عدد نامعتبر است. دوباره امتحان کن.")
+                            send_message(chat_id, "❌ عدد نامعتبر است.")
                             show_quality_list(chat_id)
                     except ValueError:
-                        send_message(chat_id, "🔢 لطفاً فقط عدد وارد کن.")
+                        send_message(chat_id, "🔢 فقط عدد بفرست.")
                         show_quality_list(chat_id)
                     continue
 
+                # دریافت لینک
                 if text.startswith("http"):
                     pending_links[chat_id] = text
                     show_quality_list(chat_id)
@@ -179,6 +210,7 @@ def main():
         except Exception as e:
             print("Main loop error:", e)
             time.sleep(5)
+
 
 if __name__ == "__main__":
     main()
