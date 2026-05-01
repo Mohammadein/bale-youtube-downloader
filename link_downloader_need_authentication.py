@@ -5,7 +5,7 @@ import subprocess
 
 # ================== تنظیمات ==================
 
-TOKEN = "TOKEN_HERE"
+TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 DOWNLOAD_DIR = "downloads"
