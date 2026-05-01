@@ -152,9 +152,10 @@ def main():
 
                 chat_id = msg["chat"]["id"]
                 text = msg["text"].strip()
-
+                user_id = msg["from"]["id"]
+                print("================USER ID===============:", user_id)
                 # ✅ بررسی مجاز بودن کاربر
-                if not is_user_allowed(chat_id):
+                if not is_user_allowed(user_id):
                     send_message(
                         chat_id,
                         "شما مجاز به استفاده از این ربات نیستید لطفا با مدیر ربات هماهنگ کنید"
