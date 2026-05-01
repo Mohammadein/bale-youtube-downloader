@@ -1,0 +1,175 @@
+import os
+import time
+import requests
+import subprocess
+
+# ================== تنظیمات ==================
+
+TOKEN = "TOKEN_HERE"
+BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
+
+DOWNLOAD_DIR = "downloads"
+PART_SIZE = "19M"
+
+ALLOWED_USERS_FILE = "allowed_users.txt"
+
+# ============================================
+
+
+def load_allowed_users():
+    if not os.path.exists(ALLOWED_USERS_FILE):
+        return set()
+
+    with open(ALLOWED_USERS_FILE, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def is_user_allowed(user_id):
+    allowed = load_allowed_users()
+    return str(user_id) in allowed
+
+
+def send_message(chat_id, text):
+    r = requests.post(
+        BASE_URL + "sendMessage",
+        json={"chat_id": chat_id, "text": text},
+        timeout=30
+    )
+    print("sendMessage:", r.text)
+
+
+def send_document(chat_id, file_path):
+    url = BASE_URL + "sendDocument"
+    with open(file_path, "rb") as f:
+        files = {
+            "document": (
+                os.path.basename(file_path),
+                f,
+                "application/octet-stream"
+            )
+        }
+        data = {"chat_id": chat_id}
+        r = requests.post(url, data=data, files=files, timeout=300)
+        print("sendDocument:", r.text)
+
+
+# ---------- دانلود با wget ----------
+
+def download_file(url: str) -> str:
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    filename = url.split("/")[-1]
+    if not filename:
+        filename = "downloaded_file"
+
+    filepath = os.path.join(DOWNLOAD_DIR, filename)
+
+    subprocess.run(
+        ["wget", "-O", filepath, url],
+        check=True
+    )
+
+    return filepath
+
+
+# ---------- پردازش و ارسال ----------
+
+def process_file(chat_id, url):
+    video_path = None
+    try:
+        send_message(chat_id, "⬇️ Downloading file...")
+
+        video_path = download_file(url)
+        video_dir = os.path.dirname(video_path)
+        video_name = os.path.basename(video_path)
+
+        send_message(chat_id, "✂️ Splitting file...")
+
+        prefix = os.path.join(video_dir, video_name + ".part_")
+
+        subprocess.run(
+            ["split", "-b", PART_SIZE, video_path, prefix],
+            check=True
+        )
+
+        parts = sorted([
+            os.path.join(video_dir, f)
+            for f in os.listdir(video_dir)
+            if f.startswith(video_name + ".part_")
+        ])
+
+        total = len(parts)
+
+        for i, part in enumerate(parts, 1):
+            send_message(chat_id, f"📤 Sending part {i}/{total}")
+            send_document(chat_id, part)
+
+        send_message(chat_id, "✅ Upload completed")
+
+    except Exception as e:
+        send_message(chat_id, f"❌ Error: {e}")
+
+    finally:
+        if video_path:
+            cleanup(video_path)
+
+
+def cleanup(video_path):
+    try:
+        dir_path = os.path.dirname(video_path)
+        base = os.path.basename(video_path)
+
+        for f in os.listdir(dir_path):
+            if f.startswith(base):
+                os.remove(os.path.join(dir_path, f))
+    except Exception as e:
+        print("Cleanup error:", e)
+
+
+# ---------- دریافت پیام‌ها ----------
+
+def get_updates(offset=None):
+    return requests.get(
+        BASE_URL + "getUpdates",
+        params={"timeout": 30, "offset": offset},
+        timeout=35
+    ).json()
+
+
+def main():
+    offset = None
+    print("✅ Bale bot started...")
+
+    while True:
+        try:
+            updates = get_updates(offset)
+            for update in updates.get("result", []):
+                offset = update["update_id"] + 1
+
+                msg = update.get("message")
+                if not msg or "text" not in msg:
+                    continue
+
+                chat_id = msg["chat"]["id"]
+                text = msg["text"].strip()
+
+                # ✅ بررسی مجاز بودن کاربر
+                if not is_user_allowed(chat_id):
+                    send_message(
+                        chat_id,
+                        "شما مجاز به استفاده از این ربات نیستید لطفا با مدیر ربات هماهنگ کنید"
+                    )
+                    continue
+
+                if text.startswith("http"):
+                    process_file(chat_id, text)
+                else:
+                    send_message(chat_id, "🔗 لطفاً لینک مستقیم فایل ارسال کن")
+
+        except Exception as e:
+            print("Main loop error:", e)
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()
