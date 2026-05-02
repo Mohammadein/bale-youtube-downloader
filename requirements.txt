@@ -5,3 +5,4 @@ pytube
 urllib3==1.26.18
 tornado==6.1
 certifi
+yt_dlp
