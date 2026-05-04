@@ -4,7 +4,7 @@ import requests
 import subprocess
 import json
 
-TOKEN = "665419412:REnWbsHEGIC_EP0kjB_VbKhxzTpLyZsFPG4"
+TOKEN = "TOKWN"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
 
 ALLOWED_USERS_FILE = "allowed_users.txt"
